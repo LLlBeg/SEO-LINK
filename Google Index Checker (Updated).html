@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Масова перевірка HTTPS-запитів і статусу сайту</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #status {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        button {
+            padding: 5px 10px;
+            margin-left: 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0069d9;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .export-button {
+            background-color: #28a745;
+        }
+        .export-button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <h1>Масова перевірка HTTPS-запитів і статусу сайту</h1>
+    <label for="urlInput">Введіть URL-адреси (по одному на рядок):</label>
+    <textarea id="urlInput" rows="10" cols="50"></textarea>
+    <br>
+    <button onclick="checkHttp()">Перевірити</button>
+    <button onclick="stopHttp()">Зупинити</button>
+    <button class="export-button" onclick="exportAll()">Експортувати всі дані</button>
+    <div id="status"></div>
+    
+    <table id="resultsTable">
+        <thead>
+            <tr>
+                <th>URL <button class="export-button" onclick="exportUrls()">Вивантажити в Excel</button></th>
+                <th>Статус <button class="export-button" onclick="exportStatuses()">Вивантажити в Excel</button></th>
+            </tr>
+        </thead>
+        <tbody id="results"></tbody>
+    </table>
+
+    <script>
+        let isChecking = false;
+        let totalUrls = 0;
+        let checkedUrls = 0;
+        let resultsArray = [];
+
+        async function checkHttp() {
+            if (isChecking) return;
+            isChecking = true;
+            totalUrls = 0;
+            checkedUrls = 0;
+            resultsArray = []; // Скидаємо масив результатів
+
+            const urlInput = document.getElementById('urlInput');
+            const resultsDiv = document.getElementById('results');
+            const statusDiv = document.getElementById('status');
+            const urls = urlInput.value.split('\n').filter(url => url.trim() !== '');
+
+            resultsDiv.innerHTML = '';
+            statusDiv.textContent = 'Очікування...';
+
+            totalUrls = urls.length;
+
+            for (let i = 0; i < urls.length; i++) {
+                const url = urls[i].trim();
+                try {
+                    if (url.startsWith('http://')) {
+                        displayResult(url, 'Статус: http');
+                        resultsArray.push({ url, status: 'HTTP' });
+                        checkedUrls++;
+                        updateStatus();
+                        continue;
+                    }
+
+                    if (!url.startsWith('https://')) {
+                        displayResult(url, 'Статус: недійсний');
+                        resultsArray.push({ url, status: 'Недійсне' });
+                        checkedUrls++;
+                        updateStatus();
+                        continue;
+                    }
+
+                    const response = await fetchUrl(url);
+                    if (response) {
+                        const status = response.status;
+                        const statusText = response.statusText;
+                        const serverStatus = status >= 200 && status < 300 ? "Сервер доступний" : `Сервер недоступний (${status} - ${statusText})`;
+                        displayResult(url, `${status} - ${statusText}`);
+                        resultsArray.push({ url, status: `${status} - ${statusText}` });
+                        checkedUrls++;
+                        updateStatus();
+                    } else {
+                        displayResult(url, 'Помилка при запиті');
+                        resultsArray.push({ url, status: 'Помилка' });
+                        checkedUrls++;
+                        updateStatus();
+                    }
+                } catch (error) {
+                    console.error(`Помилка при запиті до ${url}: ${error.message}`);
+                    displayResult(url, 'Помилка');
+                    resultsArray.push({ url, status: 'Помилка' });
+                    checkedUrls++;
+                    updateStatus();
+                }
+            }
+
+            isChecking = false;
+        }
+
+        function stopHttp() {
+            isChecking = false;
+            updateStatus();
+        }
+
+        function displayResult(url, status) {
+            const resultsDiv = document.getElementById('results');
+            const resultRow = document.createElement('tr');
+            resultRow.innerHTML = `<td>${url}</td><td>${status}</td>`;
+            resultsDiv.appendChild(resultRow);
+        }
+
+        function updateStatus() {
+            const statusDiv = document.getElementById('status');
+            if (isChecking) {
+                if (checkedUrls < totalUrls) {
+                    statusDiv.textContent = `В процесі... Перевірено ${checkedUrls} з ${totalUrls}`;
+                } else {
+                    statusDiv.textContent = `Призупинено на ${checkedUrls} з ${totalUrls}`;
+                }
+            } else {
+                statusDiv.textContent = 'Завершено';
+            }
+        }
+
+        // https://api.allorigins.win/get?url=
+
+        async function fetchUrl(url) {
+            const proxyUrl = 'https://api.allorigins.win/get?url=';
+            try {
+                const response = await fetch(proxyUrl + encodeURIComponent(url));
+                if (response.ok) {
+                    return { status: 200, statusText: 'OK' }; // Симулюємо успішну відповідь
+                } else {
+                    return { status: response.status, statusText: response.statusText }; // Повертаємо код помилки
+                }
+            } catch (error) {
+                console.error(`Помилка при запиті до ${url}: ${error.message}`);
+                return null;
+            }
+        }
+
+        function exportUrls() {
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + resultsArray.map(e => e.url).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "urls.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportStatuses() {
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + resultsArray.map(e => e.status).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "statuses.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportAll() {
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + resultsArray.map(e => `${e.url},${e.status}`).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "results.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
